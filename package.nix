@@ -1,9 +1,16 @@
 {
   busybox-sandbox-shell,
+  expat,
+  fontconfig,
+  freetype,
   lib,
+  libGL,
+  libxkbcommon,
   makeWrapper,
   naersk,
   pkg-config,
+  wayland,
+  xorg,
   ...
 }:
 naersk.buildPackage rec {
@@ -11,6 +18,17 @@ naersk.buildPackage rec {
   src = ./.;
   buildInputs = [
     busybox-sandbox-shell
+    expat
+    fontconfig
+    freetype
+    freetype.dev
+    libGL
+    libxkbcommon
+    wayland
+    xorg.libX11
+    xorg.libXcursor
+    xorg.libXi
+    xorg.libXrandr
   ];
   nativeBuildInputs = [
     pkg-config
