@@ -55,6 +55,7 @@ pub enum Msg {
 pub struct Model {
     screen_buffer: [u8; 65536],
     screen_buffer_index: usize,
+    cursor_index: usize,
     fd: OwnedFd,
     stdin: OwnedFd,
     input: String,
@@ -64,6 +65,7 @@ impl Model {
     fn new(
         screen_buffer: [u8; 65536],
         screen_buffer_index: usize,
+        cursor_index: usize,
         fd: OwnedFd,
         stdin: OwnedFd,
         input: String,
@@ -71,6 +73,7 @@ impl Model {
         Model {
             screen_buffer,
             screen_buffer_index,
+            cursor_index,
             fd,
             stdin,
             input,
@@ -84,14 +87,33 @@ impl Model {
                 None => (),
             },
             Msg::KeyPressed(key) => match key {
-                keyboard::Key::Character(c) => self.input.push_str(c.as_str()),
+                keyboard::Key::Character(c) => {
+                    self.input_char(c.chars().nth(0).unwrap());
+                }
                 keyboard::Key::Named(keyboard::key::Named::Enter) => {
                     self.input.push('\n');
                     let mut write_buffer = self.input.as_bytes().to_vec();
                     write(self.fd.as_fd(), &mut write_buffer);
                     self.input = String::new();
+                    self.cursor_index = 0;
                 }
-                keyboard::Key::Named(keyboard::key::Named::Space) => self.input.push(' '),
+                keyboard::Key::Named(keyboard::key::Named::Space) => {
+                    self.input_char(' ');
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => {
+                    if self.cursor_index <= 0 {
+                        self.cursor_index = 0;
+                    } else {
+                        self.cursor_index -= 1;
+                    }
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowRight) => {
+                    if self.cursor_index >= self.input.len() - 1 {
+                        self.cursor_index = self.input.len() - 1;
+                    } else {
+                        self.cursor_index += 1;
+                    }
+                }
                 _ => (),
             },
         };
@@ -132,12 +154,22 @@ impl Model {
             self.screen_buffer_index += 1;
         }
     }
+
+    fn input_char(&mut self, c: char) {
+        if self.cursor_index == self.input.len() {
+            self.input.push_str(c.to_string().as_str());
+        } else {
+            self.input.insert(self.cursor_index, c);
+        }
+        self.cursor_index += 1;
+    }
 }
 
 impl Default for Model {
     fn default() -> Self {
         let mut me = Self::new(
             [0; 65536],
+            0,
             0,
             spawn_pty_with_shell("/home/mtgmonkey/.nix-profile/bin/dash".to_string()),
             std::io::stdin().as_fd().try_clone_to_owned().unwrap(),
