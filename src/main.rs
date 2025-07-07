@@ -1,18 +1,12 @@
-use iced::Element;
-use iced::widget::{button, text};
-
-use nix::unistd::write;
-
-use std::fs::File;
-use std::io::Read;
-use std::io::Write;
-use std::os::unix::io::{AsFd, OwnedFd};
-
 use rust_term::*;
 
 fn main() -> iced::Result {
-    iced::run("test", Model::update, Model::view)
-    /*    let default_shell = "/home/mtgmonkey/.nix-profile/bin/dash".to_string();
+    iced::application("test", Model::update, Model::view)
+        .theme(Model::theme)
+        .subscription(Model::subscription)
+        .run()
+    /*
+        let default_shell = "/home/mtgmonkey/.nix-profile/bin/dash".to_string();
         let fd = spawn_pty_with_shell(default_shell);
         let mut write_buffer = "tty\n".as_bytes().to_vec();
         write(fd.as_fd(), &mut write_buffer);

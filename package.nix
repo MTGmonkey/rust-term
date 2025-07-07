@@ -14,7 +14,7 @@
   ...
 }:
 naersk.buildPackage rec {
-  name = "rust_pty";
+  name = "rust_term";
   src = ./.;
   buildInputs = [
     busybox-sandbox-shell

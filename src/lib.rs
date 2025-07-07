@@ -1,5 +1,6 @@
 use iced::Element;
-use iced::widget::{column, scrollable, text, text_input};
+use iced::Font;
+use iced::widget::{column, row, scrollable, text, text_input};
 
 use nix::pty::{ForkptyResult, forkpty};
 use nix::unistd::write;
@@ -49,6 +50,7 @@ fn set_nonblock(fd: &OwnedFd) {
 pub enum Msg {
     HasInput,
     InputChanged(String),
+    Tick,
 }
 
 pub struct Model {
@@ -83,34 +85,49 @@ impl Model {
                 write_buffer.push(b'\n');
                 write(self.fd.as_fd(), &mut write_buffer);
                 self.input = String::new();
-                let mut nored = 0;
-                while nored <= 2 {
-                    let red = read_from_fd(&self.fd);
-                    match &red {
-                        Some(red) => {
-                            nored += 1;
-                            self.update_screen_buffer(red);
-                        }
-                        None => (),
-                    };
-                }
             }
             Msg::InputChanged(input) => self.input = input,
+            Msg::Tick => match read_from_fd(&self.fd) {
+                Some(red) => self.update_screen_buffer(&red),
+                None => (),
+            },
         }
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
-        scrollable(column![
-            text(String::from(
+        let (left, right) = match String::from_utf8(self.screen_buffer.to_vec())
+            .unwrap()
+            .trim_end_matches('\0')
+            .rsplit_once('\n')
+        {
+            Some(tup) => (tup.0.to_string(), tup.1.to_string()),
+            None => (
+                String::new(),
                 String::from_utf8(self.screen_buffer.to_vec())
                     .unwrap()
                     .trim_end_matches('\0')
-            )),
-            text_input("", &self.input)
-                .on_input(Msg::InputChanged)
-                .on_submit(Msg::HasInput)
+                    .to_string(),
+            ),
+        };
+        scrollable(column![
+            text(left).font(Font::MONOSPACE),
+            row![
+                text(right).font(Font::MONOSPACE),
+                text_input("", &self.input)
+                    .on_input(Msg::InputChanged)
+                    .on_submit(Msg::HasInput)
+                    .font(Font::MONOSPACE)
+            ]
         ])
         .into()
+    }
+
+    pub fn theme(&self) -> iced::Theme {
+        iced::Theme::GruvboxDark
+    }
+
+    pub fn subscription(&self) -> iced::Subscription<Msg> {
+        iced::time::every(iced::time::Duration::new(0, 100)).map(|_| Msg::Tick)
     }
 
     fn update_screen_buffer(&mut self, vec: &Vec<u8>) {
