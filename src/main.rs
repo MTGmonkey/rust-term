@@ -3,6 +3,8 @@ use rust_term::*;
 fn main() -> iced::Result {
     iced::application("test", Model::update, Model::view)
         .theme(Model::theme)
+        .default_font(iced::Font::MONOSPACE)
+        .decorations(false)
         .subscription(Model::subscription)
         .run()
     /*

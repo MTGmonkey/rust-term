@@ -1,6 +1,6 @@
-use iced::Element;
-use iced::Font;
+use iced::widget::text_input::Id;
 use iced::widget::{column, row, scrollable, text, text_input};
+use iced::{Element, Font, Task};
 
 use nix::pty::{ForkptyResult, forkpty};
 use nix::unistd::write;
@@ -78,7 +78,7 @@ impl Model {
         }
     }
 
-    pub fn update(&mut self, msg: Msg) {
+    pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::HasInput => {
                 let mut write_buffer = self.input.as_bytes().to_vec();
@@ -91,7 +91,8 @@ impl Model {
                 Some(red) => self.update_screen_buffer(&red),
                 None => (),
             },
-        }
+        };
+        iced::widget::text_input::focus::<Msg>(Id::new("text_input"))
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
@@ -110,13 +111,14 @@ impl Model {
             ),
         };
         scrollable(column![
-            text(left).font(Font::MONOSPACE),
+            text(left),
             row![
-                text(right).font(Font::MONOSPACE),
+                text(right),
                 text_input("", &self.input)
                     .on_input(Msg::InputChanged)
                     .on_submit(Msg::HasInput)
-                    .font(Font::MONOSPACE)
+                    .padding(0)
+                    .id(Id::new("text_input"))
             ]
         ])
         .into()
