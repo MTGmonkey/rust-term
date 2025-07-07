@@ -1,6 +1,6 @@
 use iced::widget::text_input::Id;
 use iced::widget::{column, row, scrollable, text, text_input};
-use iced::{Element, Font, Task};
+use iced::{Element, Font, Task, keyboard};
 
 use nix::pty::{ForkptyResult, forkpty};
 use nix::unistd::write;
@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::{AsFd, OwnedFd};
 use std::process::Command;
 
-pub fn spawn_pty_with_shell(default_shell: String) -> OwnedFd {
+fn spawn_pty_with_shell(default_shell: String) -> OwnedFd {
     match unsafe { forkpty(None, None) } {
         Ok(fork_pty_res) => match fork_pty_res {
             ForkptyResult::Parent { master, .. } => {
@@ -27,7 +27,7 @@ pub fn spawn_pty_with_shell(default_shell: String) -> OwnedFd {
     }
 }
 
-pub fn read_from_fd(fd: &OwnedFd) -> Option<Vec<u8>> {
+fn read_from_fd(fd: &OwnedFd) -> Option<Vec<u8>> {
     let mut read_buffer = [0; 65536];
     let mut file = File::from(fd.try_clone().unwrap());
     file.flush();
@@ -48,9 +48,8 @@ fn set_nonblock(fd: &OwnedFd) {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    HasInput,
-    InputChanged(String),
     Tick,
+    KeyPressed(iced::keyboard::Key),
 }
 
 pub struct Model {
@@ -80,48 +79,40 @@ impl Model {
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
-            Msg::HasInput => {
-                let mut write_buffer = self.input.as_bytes().to_vec();
-                write_buffer.push(b'\n');
-                write(self.fd.as_fd(), &mut write_buffer);
-                self.input = String::new();
-            }
-            Msg::InputChanged(input) => self.input = input,
             Msg::Tick => match read_from_fd(&self.fd) {
                 Some(red) => self.update_screen_buffer(&red),
                 None => (),
             },
+            Msg::KeyPressed(key) => match key {
+                keyboard::Key::Character(c) => self.input.push_str(c.as_str()),
+                keyboard::Key::Named(keyboard::key::Named::Enter) => {
+                    self.input.push('\n');
+                    let mut write_buffer = self.input.as_bytes().to_vec();
+                    write(self.fd.as_fd(), &mut write_buffer);
+                    self.input = String::new();
+                }
+                keyboard::Key::Named(keyboard::key::Named::Space) => self.input.push(' '),
+                _ => (),
+            },
         };
-        iced::widget::text_input::focus::<Msg>(Id::new("text_input"))
+        iced::Task::<Msg>::none()
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
-        let (left, right) = match String::from_utf8(self.screen_buffer.to_vec())
-            .unwrap()
-            .trim_end_matches('\0')
-            .rsplit_once('\n')
-        {
-            Some(tup) => (tup.0.to_string(), tup.1.to_string()),
-            None => (
-                String::new(),
-                String::from_utf8(self.screen_buffer.to_vec())
-                    .unwrap()
-                    .trim_end_matches('\0')
-                    .to_string(),
-            ),
-        };
-        scrollable(column![
-            text(left),
-            row![
-                text(right),
-                text_input("", &self.input)
-                    .on_input(Msg::InputChanged)
-                    .on_submit(Msg::HasInput)
-                    .padding(0)
-                    .id(Id::new("text_input"))
-            ]
-        ])
-        .into()
+        let (left, right) =
+            match String::from_utf8(self.screen_buffer[..self.screen_buffer_index].to_vec())
+                .unwrap()
+                .rsplit_once('\n')
+            {
+                Some(tup) => (tup.0.to_string(), tup.1.to_string()),
+                None => (
+                    String::new(),
+                    String::from_utf8(self.screen_buffer[..self.screen_buffer_index].to_vec())
+                        .unwrap()
+                        .to_string(),
+                ),
+            };
+        scrollable(column![text(left), row![text(right), text(&self.input),]]).into()
     }
 
     pub fn theme(&self) -> iced::Theme {
@@ -129,13 +120,16 @@ impl Model {
     }
 
     pub fn subscription(&self) -> iced::Subscription<Msg> {
-        iced::time::every(iced::time::Duration::new(0, 100)).map(|_| Msg::Tick)
+        let tick = iced::time::every(iced::time::Duration::new(0, 1)).map(|_| Msg::Tick);
+        let key = keyboard::on_key_press(|key, _| Some(Msg::KeyPressed(key)));
+        iced::Subscription::batch(vec![tick, key])
     }
 
     fn update_screen_buffer(&mut self, vec: &Vec<u8>) {
-        let offset = self.screen_buffer.iter().position(|&c| c == b'\0').unwrap();
+        let offset = self.screen_buffer_index;
         for (i, chr) in vec.iter().enumerate() {
             self.screen_buffer[i + offset] = chr.clone();
+            self.screen_buffer_index += 1;
         }
     }
 }
