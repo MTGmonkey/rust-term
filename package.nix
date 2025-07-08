@@ -9,6 +9,7 @@
   makeWrapper,
   naersk,
   pkg-config,
+  upx,
   wayland,
   xorg,
   ...
@@ -33,8 +34,10 @@ naersk.buildPackage rec {
   nativeBuildInputs = [
     pkg-config
     makeWrapper
+    upx
   ];
   postInstall = ''
+    upx --lzma $out/bin/${meta.mainProgram}
     wrapProgram "$out/bin/${meta.mainProgram}" --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath buildInputs}"
   '';
   meta = {

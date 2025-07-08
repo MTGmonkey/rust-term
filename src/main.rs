@@ -1,35 +1,27 @@
-use rust_term::*;
+//! this crate runs a terminal
 
+#![expect(
+    clippy::needless_return,
+    clippy::cargo_common_metadata,
+    clippy::blanket_clippy_restriction_lints,
+    clippy::multiple_crate_versions,
+    unused_doc_comments,
+    reason = ""
+)]
+
+use rust_term::{Model, flags, init};
+
+#[expect(clippy::undocumented_unsafe_blocks, reason = "clippy be trippin")]
 fn main() -> iced::Result {
-    iced::application("test", Model::update, Model::view)
+    /// SAFETY call does occur *before* the initialization of a Model
+    /// SAFETY call does occur *before* any opportunity to call `print_err()`
+    unsafe {
+        init(flags().run());
+    };
+    return iced::application("test", Model::update, Model::view)
         .theme(Model::theme)
         .default_font(iced::Font::MONOSPACE)
         .decorations(false)
         .subscription(Model::subscription)
-        .run()
-    /*
-        let default_shell = "/home/mtgmonkey/.nix-profile/bin/dash".to_string();
-        let fd = spawn_pty_with_shell(default_shell);
-        let mut write_buffer = "tty\n".as_bytes().to_vec();
-        write(fd.as_fd(), &mut write_buffer);
-        loop {
-            let red = read_from_fd(&fd);
-            match red {
-                Some(red) => print!("{}", String::from_utf8(red).unwrap()),
-                None => {
-                    let mut read_buffer = [0; 65536];
-                    let mut file = File::from(std::io::stdin().as_fd().try_clone_to_owned().unwrap());
-                    file.flush();
-                    let file = file.read(&mut read_buffer);
-                    println!(
-                        "{}",
-                        match file {
-                            Ok(file) => write(fd.as_fd(), &read_buffer[..file]).unwrap(),
-                            Err(_) => 0,
-                        }
-                    );
-                }
-            };
-        }
-    */
+        .run();
 }

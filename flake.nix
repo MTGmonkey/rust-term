@@ -13,12 +13,19 @@
   }: let
     system = "x86_64-linux";
     pkgs = nixpkgs.legacyPackages.${system};
-  in {
+  in rec {
     packages.${system} = {
       default = pkgs.callPackage ./package.nix {
         naersk = pkgs.callPackage naersk {};
       };
     };
-    #    nixosModules.${system}.default = ./module.nix;
+    devShells.${system}.default = pkgs.mkShell {
+      nativeBuildInputs =
+        [
+          pkgs.clippy
+        ]
+        ++ packages.${system}.default.buildInputs
+        ++ packages.${system}.default.nativeBuildInputs;
+    };
   };
 }
