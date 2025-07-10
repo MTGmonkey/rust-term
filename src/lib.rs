@@ -16,6 +16,9 @@
     reason = ""
 )]
 
+use crate::enums::*;
+use crate::parsers::*;
+
 use bpaf::Bpaf;
 
 use iced::widget::{column, rich_text, row, scrollable, span, text};
@@ -32,8 +35,17 @@ use std::os::unix::io::{AsFd as _, OwnedFd};
 use std::process::Command;
 use std::{error, fmt, thread, time as core_time};
 
+pub mod enums;
+pub mod parsers;
+
 /// whether to enable verbose logging; see `Flags::verbose`
 static mut VERBOSE: bool = false;
+
+/// whether to enable debug logging; see `Flags::debug`
+static mut DEBUG: bool = false;
+
+/// whether to enable vomit logging; see `Flags::vomit`
+static mut VOMIT: bool = false;
 
 /// shell path; see `Flags::shell`
 static mut SHELL: Option<String> = None;
@@ -106,13 +118,25 @@ pub struct Flags {
     #[bpaf(short('S'), long)]
     shell: Option<String>,
 
-    /// whether to debug log
+    /// no logging, NOOP; log level 0
     #[bpaf(short, long)]
+    quiet: bool,
+
+    /// whether to error log; log level 1
+    #[bpaf(short('v'), long)]
     verbose: bool,
 
-    /// whether to display version: TODO
+    /// whether to debug log; log level 2
+    #[bpaf(long)]
+    debug: bool,
+
+    /// whether to vomit log; log level 3
+    #[bpaf(long)]
+    vomit: bool,
+
+    /// whether to display version, NOOP; TODO
     #[expect(dead_code, reason = "TODO")]
-    #[bpaf(short, long)]
+    #[bpaf(short('V'), long)]
     version: bool,
 }
 
@@ -126,7 +150,7 @@ pub struct Flags {
 ///     .subscription(Model::subscription)
 ///     .run()
 /// ```
-pub struct Model {
+pub struct Model<'a> {
     /// location of cursor in user input line
     cursor_index: usize,
     /// fd of pty
@@ -139,9 +163,12 @@ pub struct Model {
     screen_buffer_index: usize,
     /// path to shell
     shell: String,
+
+    screen: Vec<&'a str>,
+    cursor: (usize, usize),
 }
 
-impl Model {
+impl Model<'_> {
     /// applies needed side effects when taking an input char
     #[expect(
         clippy::arithmetic_side_effects,
@@ -238,7 +265,7 @@ impl Model {
                             print_err(&error);
                         }
                     }
-                    Err(error) => print_err(&error),
+                    Err(error) => print_vomit(&error.to_string()),
                 }
                 return iced::Task::none();
             }
@@ -252,15 +279,21 @@ impl Model {
         reason = "all is bound checked"
     )]
     fn update_screen_buffer(&mut self, vec: &[u8]) -> Result<(), Error> {
-        let offset = self.screen_buffer_index;
-        for (i, chr) in vec.iter().enumerate() {
-            let index = i + offset;
-            if index < self.screen_buffer.len() {
-                self.screen_buffer[index] = *chr;
-            } else {
-                return Err(Error::IndexOutOfBounds);
+        for chr in String::from_utf8_lossy(vec).ansi_parse() {
+            match chr {
+                Token::Text(txt) => {
+                    print_debug(&(String::from("[CHR]") + txt));
+                    if self.screen_buffer_index < self.screen_buffer.len() {
+                        self.screen_buffer[self.screen_buffer_index] =
+                            *txt.as_bytes().get(0).unwrap_or(&b'_');
+                        self.screen_buffer_index += 1;
+                    }
+                }
+                Token::C0(c0) => print_debug(&(String::from("[C0]") + &format!("{:?}", c0))),
+                Token::EscapeSequence(seq) => {
+                    print_debug(&(String::from("[SEQ]") + &format!("{:?}", seq)))
+                }
             }
-            self.screen_buffer_index += 1;
         }
         return Ok(());
     }
@@ -324,7 +357,7 @@ impl Model {
     }
 }
 
-impl Default for Model {
+impl Default for Model<'_> {
     #[inline]
     #[expect(clippy::undocumented_unsafe_blocks, reason = "clippy be trippin")]
     fn default() -> Self {
@@ -339,6 +372,8 @@ impl Default for Model {
                 || return String::from("/home/mtgmonkey/.nix-profile/bin/dash"),
                 |shell| return shell,
             ),
+            screen: vec![],
+            cursor: (1, 1),
         };
         me.fd = spawn_pty_with_shell(&me.shell).ok();
         let mut nored = true;
@@ -362,7 +397,13 @@ impl Default for Model {
 #[expect(clippy::undocumented_unsafe_blocks, reason = "clippy be trippin")]
 pub unsafe fn init(flags: Flags) {
     unsafe {
+        DEBUG = flags.debug;
+    }
+    unsafe {
         VERBOSE = flags.verbose;
+    }
+    unsafe {
+        VOMIT = flags.vomit;
     }
     unsafe {
         SHELL = flags.shell;
@@ -448,8 +489,38 @@ fn set_nonblock(fd: &OwnedFd) -> Result<(), Error> {
     clippy be buggin"
 )]
 fn print_err(error: &Error) {
-    /// SAFETY the only time VERBOSE is written to should be `init()`
+    /// SAFETY the only time `VERBOSE` is written to should be `init()`
     if unsafe { VERBOSE } {
         println!("[ERROR] {error}");
+    }
+}
+
+/// if `VOMIT` is `true`, logs vomit
+#[inline]
+#[expect(
+    clippy::print_stdout,
+    clippy::undocumented_unsafe_blocks,
+    reason = "toggleable with VERBOSE option\n
+    clippy be buggin"
+)]
+fn print_vomit(vomit: &str) {
+    /// SAFETY the only time `VOMIT` is written to should be `init()`
+    if unsafe { VOMIT } {
+        println!("[VOMIT] {:?}", vomit);
+    }
+}
+
+/// if `DEBUG` is `true`, logs errors
+#[inline]
+#[expect(
+    clippy::print_stdout,
+    clippy::undocumented_unsafe_blocks,
+    reason = "toggleable with VERBOSE option\n
+    clippy be buggin"
+)]
+fn print_debug(debug: &str) {
+    /// SAFETY the only time `DEBUG` is written to should be `init()`
+    if unsafe { DEBUG } {
+        println!("[DEBUG] {:?}", debug);
     }
 }

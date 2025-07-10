@@ -7,6 +7,8 @@ edition = "2024"
 nix = { version = "0.30.1", features = ["term", "process", "fs"], default-features = false }
 iced = { version = "0.13.1", features = ["advanced", "smol", "wgpu"], default-features = false }
 bpaf = { version = "0.9.20", features = ["derive"], default-features = false }
+heapless = "0.8.0"
+nom = "8.0.0"
 
 [lints.clippy]
 cargo = "deny"
