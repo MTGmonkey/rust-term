@@ -17,7 +17,6 @@
 )]
 
 use crate::enums::*;
-use crate::parsers::*;
 
 use bpaf::Bpaf;
 
@@ -150,25 +149,22 @@ pub struct Flags {
 ///     .subscription(Model::subscription)
 ///     .run()
 /// ```
-pub struct Model<'a> {
+pub struct Model {
     /// location of cursor in user input line
     cursor_index: usize,
     /// fd of pty
     fd: Option<OwnedFd>,
     /// user input line
     input: String,
-    /// all chars on screen
-    screen_buffer: [u8; 0x4000],
-    /// length of `screen_buffer`'s filled area
-    screen_buffer_index: usize,
     /// path to shell
     shell: String,
 
-    screen: Vec<&'a str>,
+    screen: Vec<Vec<String>>,
     cursor: (usize, usize),
+    dimensions: (usize, usize),
 }
 
-impl Model<'_> {
+impl Model {
     /// applies needed side effects when taking an input char
     #[expect(
         clippy::arithmetic_side_effects,
@@ -261,7 +257,7 @@ impl Model<'_> {
                 let red = read_from_option_fd(self.fd.as_ref());
                 match red {
                     Ok(red) => {
-                        if let Err(error) = self.update_screen_buffer(&red) {
+                        if let Err(error) = self.update_screen(red) {
                             print_err(&error);
                         }
                     }
@@ -271,31 +267,96 @@ impl Model<'_> {
             }
         }
     }
-
-    /// reads from the pty and adds it to the buffer
-    #[expect(
-        clippy::arithmetic_side_effects,
-        clippy::indexing_slicing,
-        reason = "all is bound checked"
-    )]
-    fn update_screen_buffer(&mut self, vec: &[u8]) -> Result<(), Error> {
-        for chr in String::from_utf8_lossy(vec).ansi_parse() {
-            match chr {
-                Token::Text(txt) => {
-                    print_debug(&(String::from("[CHR]") + txt));
-                    if self.screen_buffer_index < self.screen_buffer.len() {
-                        self.screen_buffer[self.screen_buffer_index] =
-                            *txt.as_bytes().get(0).unwrap_or(&b'_');
-                        self.screen_buffer_index += 1;
+    /*
+        /// reads from the pty and adds it to the buffer
+        #[expect(
+            clippy::arithmetic_side_effects,
+            clippy::indexing_slicing,
+            reason = "all is bound checked"
+        )]
+        fn update_screen_buffer(&mut self, vec: Vec<u8>) -> Result<(), Error> {
+            for chr in String::from_utf8_lossy(&vec).ansi_parse() {
+                match chr {
+                    Token::Text(txt) => {
+                        print_debug(&(String::from("[CHR]") + txt));
+                        if self.screen_buffer_index < self.screen_buffer.len() {
+                            self.screen_buffer[self.screen_buffer_index] =
+                                *txt.as_bytes().get(0).unwrap_or(&b'_');
+                            self.screen_buffer_index += 1;
+                        }
+                    }
+                    Token::C0(c0) => print_debug(&(String::from("[C0]") + &format!("{:?}", c0))),
+                    Token::EscapeSequence(seq) => {
+                        print_debug(&(String::from("[SEQ]") + &format!("{:?}", seq)))
                     }
                 }
-                Token::C0(c0) => print_debug(&(String::from("[C0]") + &format!("{:?}", c0))),
+            }
+            return Ok(());
+        }
+    */
+    fn update_screen(&mut self, vec: Vec<u8>) -> Result<(), Error> {
+        for chr in String::from_utf8_lossy(&vec).ansi_parse() {
+            match chr {
+                Token::Text(chr) => {
+                    print_debug(&(String::from("[CHR]") + chr));
+                    if self.cursor.1 < self.dimensions.1 {
+                        self.cursor.1 += 1;
+                    } else {
+                        if self.cursor.0 < self.dimensions.0 {
+                            self.cursor.0 += 1;
+                            self.cursor.1 = 1;
+                        } else {
+                            self.screen.remove(0);
+                            self.cursor.1 = 1;
+                        }
+                    }
+                    let res = self.write_chr_to_screen(chr);
+                }
+                Token::C0(c0) => {
+                    print_debug(&(String::from("[C0]") + &format!("{:?}", c0)));
+                    match c0 {
+                        C0::SP => {
+                            if self.cursor.1 < self.dimensions.1 {
+                                self.cursor.1 += 1;
+                            } else {
+                                self.cursor.0 += 1;
+                                self.cursor.1 = 1;
+                            }
+                            let res = self.write_chr_to_screen(" ");
+                        }
+                        C0::CR => self.cursor.1 = 1,
+                        C0::LF => {
+                            if self.cursor.0 < self.dimensions.0 {
+                                self.cursor.0 += 1;
+                            } else {
+                                self.screen.remove(0);
+                            }
+                        }
+                        _ => (),
+                    }
+                }
                 Token::EscapeSequence(seq) => {
                     print_debug(&(String::from("[SEQ]") + &format!("{:?}", seq)))
                 }
             }
         }
         return Ok(());
+    }
+
+    fn write_chr_to_screen(&mut self, chr: &str) -> Result<(), Error> {
+        if self.dimensions.0 >= self.cursor.0 && self.dimensions.1 >= self.cursor.1 {
+            while self.screen.len() < self.cursor.0 {
+                self.screen.push(vec![]);
+            }
+            while self.screen[self.cursor.0 - 1].len() < self.cursor.1 {
+                self.screen[self.cursor.0 - 1].push("_".to_string());
+            }
+            self.screen[self.cursor.0 - 1].remove(self.cursor.1 - 1);
+            self.screen[self.cursor.0 - 1].insert(self.cursor.1 - 1, chr.to_string());
+        } else {
+            return Err(Error::IndexOutOfBounds);
+        }
+        Ok(())
     }
 
     /// view logic for model\
@@ -309,6 +370,7 @@ impl Model<'_> {
         reason = "TODO"
     )]
     pub fn view(&self) -> Element<'_, Msg> {
+        /*
         let (left, right) =
             String::from_utf8_lossy(&self.screen_buffer[..self.screen_buffer_index])
                 .rsplit_once('\n')
@@ -326,10 +388,15 @@ impl Model<'_> {
                         return (tup.0.to_owned(), tup.1.to_owned());
                     },
                 );
+        */
+        let mut body = String::new();
+        for row in &self.screen {
+            body += &row.iter().map(|a| a.to_owned()).collect::<String>();
+            body += "\n";
+        }
         return scrollable(column![
-            text(left),
+            text(body),
             row![
-                text(right),
                 text(&self.input[..(self.cursor_index)]),
                 if self.cursor_index < self.input.len() {
                     row![
@@ -357,13 +424,11 @@ impl Model<'_> {
     }
 }
 
-impl Default for Model<'_> {
+impl Default for Model {
     #[inline]
     #[expect(clippy::undocumented_unsafe_blocks, reason = "clippy be trippin")]
     fn default() -> Self {
         let mut me = Self {
-            screen_buffer: [0; 0x4000],
-            screen_buffer_index: 0,
             cursor_index: 0,
             fd: None,
             input: String::new(),
@@ -374,6 +439,7 @@ impl Default for Model<'_> {
             ),
             screen: vec![],
             cursor: (1, 1),
+            dimensions: (25, 80),
         };
         me.fd = spawn_pty_with_shell(&me.shell).ok();
         let mut nored = true;
@@ -381,7 +447,7 @@ impl Default for Model<'_> {
             let red = read_from_option_fd(me.fd.as_ref());
             if let Ok(red) = red {
                 nored = false;
-                if let Err(error) = me.update_screen_buffer(&red) {
+                if let Err(error) = me.update_screen(red) {
                     print_err(&error);
                 }
             }
